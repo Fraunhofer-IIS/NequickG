@@ -1,15 +1,19 @@
-from aux import *
-import CCIR_MoDIP.ccir_fm3
-import CCIR_MoDIP.ccir_f2
-import CCIR_MoDIP.modip
+from .aux_funcs import *
+from .CCIR_MoDIP import ccir_fm3
+from .CCIR_MoDIP import ccir_f2
+from .CCIR_MoDIP import modip
 import numpy as np
 
-# np.seterr(invalid = 'raise')
 
 class NEQTime:
     def __init__(self, mth, universal_time):
-        self.mth = int(mth)  # {01, 02, 03 ... 11, 12}
-        self.universal_time = universal_time  # hours and decimals
+        """
+        Class containing a time instant
+        :param mth: Month {01, 02, 03 ... 11, 12}
+        :param universal_time: Hour with decimals
+        """
+        self.mth = int(mth)
+        self.universal_time = universal_time
 
     def __hash__(self):
         return hash((self.mth, self.universal_time))
@@ -20,38 +24,41 @@ class NEQTime:
 
 class Position:
     def __init__(self, latitude, longitude):
+        """
+        Class containing a latitude and longitude
+        :param latitude:
+        :param longitude:
+        """
         self.latitude = latitude  # degrees
         self.longitude = longitude  # degrees
 
     def __hash__(self):
-        return hash((int(self.latitude), int(self.longitude)/2))
+        return hash((int(self.latitude), int(self.longitude) / 2))
 
     def __eq__(self, other):
         # arbitrary design decision: decimal places in position have no significance
-        return (int(self.latitude), int(self.longitude)/2) == (int(other.latitude), int(other.longitude)/2)
+        return (int(self.latitude), int(self.longitude) / 2) == (int(other.latitude), int(other.longitude) / 2)
 
 
 class GalileoBroadcast:
+    """ Class containing Galileo broadcast parameters"""
     def __init__(self, ai0, ai1, ai2):
         self.ai0 = ai0
         self.ai1 = ai1
         self.ai2 = ai2
 
 
-
-
 class NequickG:
     def __init__(self, parameters):
-        # self.Para = parameters
         self.hmF2 = parameters.hmF2
         topside_para = parameters.topside_para()
         bottomside_para = parameters.bottomside_para()
-        self.topside = NequickG_topside(*topside_para)
-        self.bottomside = NequickG_bottomside(*bottomside_para)
+        self.topside = NequickGTopside(*topside_para)
+        self.bottomside = NequickGBottomside(*bottomside_para)
 
     def electrondensity(self, h):
         """
-
+        Returns the electron density at a certain altitute
         :param h: [km]
         :return: electron density [m^-3]
         """
@@ -63,27 +70,27 @@ class NequickG:
         h_bot = h[mask1]
         h_top = h[mask2]
 
-        N = np.empty(np.shape(h))
+        n = np.empty(np.shape(h))
 
-        N[mask1] = self.bottomside.electrondensity(h_bot)
-        N[mask2] = self.topside.electrondensity(h_top)
+        n[mask1] = self.bottomside.electrondensity(h_bot)
+        n[mask2] = self.topside.electrondensity(h_top)
 
-        assert (not np.any(N < 0))
+        assert (not np.any(n < 0))
 
-        return N
+        return n
 
-    def vTEC(self, h1, h2, tolerance=None):
+    def v_tec_calculate(self, h1, h2, tolerance=None):
         """
         Vertical TEC numerical Integration
         :param h1: integration lower endpoint
         :param h2: integration higher endpoint
         :param tolerance:
-        :return:
+        :return: TEC
         """
 
         assert (h2 > h1)
 
-        if tolerance == None:
+        if tolerance is None:
             if h1 < 1000:
                 tolerance = 0.001
             else:
@@ -91,26 +98,25 @@ class NequickG:
 
         n = 8
 
-        GN1 = self.__single_quad(h1, h2, n)
+        gn1 = self.__single_quad(h1, h2, n)
         n *= 2
-        GN2 = self.__single_quad(h1, h2, n)  # TODO: there is repeated work here. can be optimized
+        gn2 = self.__single_quad(h1, h2, n)  # TODO: there is repeated work here. can be optimized
 
         count = 1
-        while (abs(GN2 - GN1) > tolerance * abs(GN1)) and count < 20:
-            GN1 = GN2
+        while (abs(gn2 - gn1) > tolerance * abs(gn1)) and count < 20:
+            gn1 = gn2
             n *= 2
-            GN2 = self.__single_quad(h1, h2, n)
+            gn2 = self.__single_quad(h1, h2, n)
             count += 1
 
         if count == 20:
-            print "vTEC integration did not converge"
+            print("v_tec_calculate integration did not converge")
 
-        return (GN2 + (GN2 - GN1) / 15.0)
+        return gn2 + (gn2 - gn1) / 15.0
 
-
-    def vTEC_ratio(self):
-        bot = self.vTEC(0, self.hmF2)
-        top = self.vTEC(self.hmF2, 20000)
+    def v_tec_ratio(self):
+        bot = self.v_tec_calculate(0, self.hmF2)
+        top = self.v_tec_calculate(self.hmF2, 20000)
 
         return top / bot
 
@@ -122,18 +128,16 @@ class NequickG:
         y = h1 + (delta - g) / 2.0
 
         h = np.empty(2 * n)
-        I = np.arange(n)
-        h[0::2] = y + I * delta
-        h[1::2] = y + I * delta + g
-        N = self.electrondensity(h)
-        GN = delta / 2.0 * np.sum(N)
+        i_v = np.arange(n)
+        h[0::2] = y + i_v * delta
+        h[1::2] = y + i_v * delta + g
+        n = self.electrondensity(h)
+        gn = delta / 2.0 * np.sum(n)
 
-        return GN
-
-
+        return gn
 
 
-class NequickG_parameters:
+class NequickGparameters:
     def __init__(self, pos, broadcast, time):
         self.Position = pos  # Nequick position object
         self.Broadcast = broadcast  # Nequick broadcast object
@@ -153,27 +157,27 @@ class NequickG_parameters:
         self.__readccirXXfiles__()
         self.__interpolate_AZR__()
         self.__F2fouriertimeseries__()
-        self.F2Layer()
-        self.ELayer()
-        self.F1Layer()
+        self.f2_layer()
+        self.e_layer()
+        self.f1_layer()
 
         # Stage 3
-        self.get_hmE()
-        self.get_hmF2()
-        self.get_hmF1()
+        self.get_hme()
+        self.get_hm_f2()
+        self.get_hm_f1()
 
         # Stage 4
-        self.get_B2bot()
-        self.get_B1top()
-        self.get_B1bot()
-        self.get_BEtop()
-        self.get_BEbot()
+        self.get_b2_bot()
+        self.get_b1_top()
+        self.get_b1_bot()
+        self.get_be_top()
+        self.get_be_bot()
 
         # Stage 5
-        self.get_A1()
-        self.get_A2A3()
+        self.get_a1()
+        self.get_a2a3()
         self.shape_parameter()
-        self.get_H0()
+        self.get_h0()
 
     def topside_para(self):
         return [self.NmF2, self.hmF2, self.H0]
@@ -183,7 +187,7 @@ class NequickG_parameters:
         return [self.hmE, self.hmF1, self.hmF2, self.BEtop, self.BEbot, self.B1top, self.B1bot, self.B2bot, self.A1,
                 self.A2, self.A3]
 
-    ############################ STAGE 1####################################
+    # STAGE 1####################################
     def __compute_MODIP__(self):
         """
         Reference: Section 2.5.4.3 of GSA's "Ionospheric Correction
@@ -198,7 +202,7 @@ class NequickG_parameters:
         latitude = self.Position.latitude
         longitude = self.Position.longitude
 
-        sq , lon_excess, lat_excess= self.__square(latitude, longitude)
+        sq, lon_excess, lat_excess = self.__square(latitude, longitude)
         mu2 = self.__interpolate2d(sq, lon_excess, lat_excess)
         self.modip = mu2
 
@@ -228,8 +232,8 @@ class NequickG_parameters:
         lat_division = 5.0
 
         # Longitude
-        lon = (longitude + 180)/lon_division
-        lon_start = int(lon) - 2 # range : -2 to 34 or 16 to 52 or -20 to 16
+        lon = (longitude + 180) / lon_division
+        lon_start = int(lon) - 2  # range : -2 to 34 or 16 to 52 or -20 to 16
         lon_excess = lon - int(lon)
 
         # max permissible lon_start is 34
@@ -241,38 +245,38 @@ class NequickG_parameters:
             lon_start = lon_start - num_division
 
         lat = (latitude + 90.0) / lat_division + 1
-        lat_start = int(lat - 1e-6) - 2 # why?
+        lat_start = int(lat - 1e-6) - 2  # why?
         lat_excess = lat - lat_start - 2
 
-        stModip = np.array(CCIR_MoDIP.modip.stModip)
-        square =stModip[lat_start+1:lat_start+5,lon_start+2:lon_start+6]
+        st_modip = np.array(modip.stModip)
+        square = st_modip[lat_start + 1:lat_start + 5, lon_start + 2:lon_start + 6]
         return square, lon_excess, lat_excess
 
-    def __interpolate2d(self, Z, x, y):
+    def __interpolate2d(self, z, x, y):
         """
 
-        :param Z: 4x4 2D array of modip values
+        :param z: 4x4 2D array of modip values
         :param x: normalised longitude displacement [0<x<1]
         :param y: normalised latitude displacement [0<y<1]
         :return: lagrange 3-order interpolated modip
         """
-        assert (np.shape(Z) == (4,4))
+        assert (np.shape(z) == (4, 4))
 
         deltax = 2 * x - 1
         deltay = 2 * y - 1
 
         # Interpolate horizontally first
-        G1 = Z[2,:] + Z[1,:]
-        G2 = Z[2,:] - Z[1,:]
-        G3 = Z[3,:] + Z[0,:]
-        G4 = (Z[3,:] - Z[0,:]) / 3.0
+        g1 = z[2, :] + z[1, :]
+        g2 = z[2, :] - z[1, :]
+        g3 = z[3, :] + z[0, :]
+        g4 = (z[3, :] - z[0, :]) / 3.0
 
-        A0 = 9 * G1 - G3
-        A1 = 9 * G2 - G4
-        A2 = G3 - G1
-        A3 = G4 - G2
+        a0 = 9 * g1 - g3
+        a1 = 9 * g2 - g4
+        a2 = g3 - g1
+        a3 = g4 - g2
 
-        z = 1 / 16.0 * (A0 + A1 * deltay + A2 * deltay ** 2 + A3 * deltay ** 3)
+        z = 1 / 16.0 * (a0 + a1 * deltay + a2 * deltay ** 2 + a3 * deltay ** 3)
 
         g1 = z[2] + z[1]
         g2 = z[2] - z[1]
@@ -286,37 +290,36 @@ class NequickG_parameters:
 
         return 1 / 16.0 * (a0 + a1 * deltax + a2 * deltax ** 2 + a3 * deltax ** 3)
 
-
     def __effective_ionization__(self):
         """
 
         :param ai0:
         :param ai1:
         :param ai2:
-        :param MoDIP: [deg]
+        :param mo_dip: [deg]
         :return: Effective ionoiszation level
-        Remark: Az is equivalent to F10.7 in climatological NeQuick
+        Remark: az is equivalent to F10.7 in climatological NeQuick
         It is a mystery to me why a solar index is a designed to vary with geographical location
         """
         ai0 = self.Broadcast.ai0
         ai1 = self.Broadcast.ai1
         ai2 = self.Broadcast.ai2
 
-        MoDIP = self.modip
+        mo_dip = self.modip
 
         if (ai0 == 0) and (ai1 == 0) and (ai2 == 0):
-            Az = 63.7
+            az = 63.7
         else:
-            Az = ai0 + ai1 * MoDIP + ai2 * MoDIP ** 2
+            az = ai0 + ai1 * mo_dip + ai2 * mo_dip ** 2
 
-        if Az < 0:
-            Az = 0
-        elif Az > 400:
-            Az = 400
+        if az < 0:
+            az = 0
+        elif az > 400:
+            az = 400
         # Reference Section 3.3
-        assert Az <= 400
-        assert Az >= 0
-        self.Az = Az
+        assert az <= 400
+        assert az >= 0
+        self.Az = az
         return self.Az
 
     def __effective_sunspot_number__(self):
@@ -349,7 +352,7 @@ class NequickG_parameters:
         Compute sin(delta_Sun ), cos(delta_Sun ), the sine and cosine of the solar declination.
         :param month: [mth]
         :param universal_time: [hours and decimals]
-        :return:(Cosine, Sine)
+        :return:(Cosine, sine)
         """
 
         month = self.Time.mth
@@ -364,16 +367,17 @@ class NequickG_parameters:
         a_l = a_m + (1.916 * np.sin(a_m) + 0.020 * np.sin(2 * a_m) + 282.634) * (np.pi / 180)  # radians
 
         # Compute sine and cosine of solar declination
-        Sine = 0.39782 * np.sin(a_l)
-        Cosine = np.sqrt(1 - Sine ** 2)
+        sine = 0.39782 * np.sin(a_l)
+        cosine = np.sqrt(1 - sine ** 2)
 
-        self.solarsine = Sine
-        self.solarcosine = Cosine
+        self.solarsine = sine
+        self.solarcosine = cosine
 
-        return (Cosine, Sine)
+        return cosine, sine
 
     def __localtime(self, universal_time, longitude):
-        return universal_time + longitude / 15.0 # 15 degrees per hour
+        """ Compute local time from UTC hour"""
+        return universal_time + longitude / 15.0  # 15 degrees per hour
 
     def __solar_zenith__(self):
         """
@@ -407,14 +411,15 @@ class NequickG_parameters:
         """
 
         chi0 = 86.23292796211615
-        self.chi_eff = NeqJoin(90 - 0.24 * NeqClipExp(20 - 0.2 * self.chi), self.chi, 12, self.chi - chi0)
+        self.chi_eff = neq_join(90 - 0.24 * neq_clip_exp(20 - 0.2 * self.chi), self.chi, 12, self.chi - chi0)
         return self.chi_eff
 
     def get_stage1para(self):
         name = ['modip', 'effective_ionization', 'effective_sunspot_number', 'solarcosine', 'solarsine', 'solar_zenith', 'effective_solar_zenith']
         return name, [self.modip, self.Az, self.Azr, self.solarcosine, self.solarsine, self.chi, self.chi_eff]
-    ############################ STAGE 2####################################
-    def ELayer(self):
+
+    # STAGE 2####################################
+    def e_layer(self):
         """
         Reference: 2.5.5.1
         :param latitude: [deg]
@@ -439,23 +444,22 @@ class NequickG_parameters:
             raise ValueError('Month must be an integer between 1 and 12')
 
         # Introduce the latitudinal dependence
-        ee = NeqClipExp(0.3 * latitude)
+        ee = neq_clip_exp(0.3 * latitude)
         self.seasp = seas * (ee - 1) / (ee + 1)
         seasp = self.seasp
         self.foE = np.sqrt((1.112 - 0.019 * seasp) ** 2 * np.sqrt(Az) * np.cos(chi_eff * np.pi / 180) ** 0.6 + 0.49)
-        self.NmE = NeqCriticalFreqToNe(self.foE)
-
+        self.NmE = neq_critical_freq_to_ne(self.foE)
 
         # #checking
-        # chin = NeqJoin(90 - 0.24*NeqClipExp(20-0.2*self.chi), self.chi, 12, self.chi - 86.23292796211615)
+        # chin = neq_join(90 - 0.24*neq_clip_exp(20-0.2*self.chi), self.chi, 12, self.chi - 86.23292796211615)
         # sfac = (1.112 - 0.019 * seasp) * np.sqrt(np.sqrt(self.Az))
-        # fa = sfac * NeqClipExp(np.log(np.cos(chin*np.pi/180)) * 0.3)
+        # fa = sfac * neq_clip_exp(np.log(np.cos(chin*np.pi/180)) * 0.3)
         # foE = np.sqrt(fa * fa + 0.49)
         #
-        # print foE - self.foE
+        # print(foE - self.foE
         if (self.foE < 0):
-            print self.foE
-        assert(self.foE >= 0)
+            print(self.foE)
+        assert (self.foE >= 0)
         return self.foE, self.NmE
 
     def __readccirXXfiles__(self):
@@ -466,8 +470,8 @@ class NequickG_parameters:
         :return:f2_ijk array and fm3_ijk
         """
 
-        self.F2 = np.array(CCIR_MoDIP.ccir_f2.F2[self.Time.mth])
-        self.Fm3 = np.array(CCIR_MoDIP.ccir_fm3.Fm3[self.Time.mth])
+        self.F2 = np.array(ccir_f2.F2[self.Time.mth])
+        self.Fm3 = np.array(ccir_fm3.Fm3[self.Time.mth])
 
         return self.F2, self.Fm3
 
@@ -529,10 +533,10 @@ class NequickG_parameters:
 
         return self.CF2, self.Cm3
 
-    def __geographical_variation__(self, Q):
+    def __geographical_variation__(self, q):
         """
 
-        :param Q: array of length of modip expansion
+        :param q: array of length of modip expansion
         :return:
         Refer to page 18 of "Advances in Ionospheric Mapping by Numerical Methods (1966)"
         """
@@ -543,18 +547,17 @@ class NequickG_parameters:
         G = []
         m = np.sin(modip * np.pi / 180)
         p = np.cos(latitude * np.pi / 180)
-        for i in range(Q[0]):
-            G.append(m**i)
+        for i in range(q[0]):
+            G.append(m ** i)
 
-        for i in range(1,len(Q)):
-            for j in range(Q[i]):
-                G.append(m**j * p**i * np.cos(i * longitude * np.pi / 180) )
-                G.append(m**j * p**i * np.sin(i * longitude * np.pi / 180) )
+        for i in range(1, len(q)):
+            for j in range(q[i]):
+                G.append(m ** j * p ** i * np.cos(i * longitude * np.pi / 180))
+                G.append(m ** j * p ** i * np.sin(i * longitude * np.pi / 180))
 
         return np.array(G)
 
-
-    def F2Layer(self):
+    def f2_layer(self):
         """
         legendre_calculation
         :param modip:
@@ -572,22 +575,21 @@ class NequickG_parameters:
         foF2 = np.sum(CF2 * G)
         self.foF2 = foF2
 
-
         G = self.__geographical_variation__([7, 8, 6, 3, 2, 1, 1])
         assert (len(G) == 49)
         M3000F2 = np.sum(Cm3 * G)
         self.M3000F2 = M3000F2
-        assert ( self.M3000F2 > 0 )
+        assert (self.M3000F2 > 0)
 
-        self.NmF2 = NeqCriticalFreqToNe(self.foF2)
+        self.NmF2 = neq_critical_freq_to_ne(self.foF2)
 
         # if foF2 < 0:
-        #     print foF2, self.Azr, self.Az, self.NmF2, self.Position.latitude, self.Position.longitude
+        #     print(foF2, self.Azr, self.Az, self.NmF2, self.Position.latitude, self.Position.longitude
         # assert (foF2 > 0) # this will fail
 
         return self.foF2, self.M3000F2, self.NmF2
 
-    def F1Layer(self):
+    def f1_layer(self):
         """
 
         :param foE: E layer critical frequency [MHz]
@@ -598,26 +600,26 @@ class NequickG_parameters:
         foF2 = self.foF2
 
         # In the day, foF1 = 1.4foE. In the night time, foF1 = 0
-        # use NeqJoin for a smooth day-night transition
+        # use neq_join for a smooth day-night transition
         # gradient factor of 1000 is arbitrary and large so that neqjoin can approx a step function
         # why is foE = 2 a threshold for day -night boundary?
 
-        # print '1.4 * foE', 1.4 * foE
-        foF1 = NeqJoin(1.4 * foE, 0, 1000.0, foE - 2)
-        # print 'foF1: ', foF1
-        foF1 = NeqJoin(0, foF1, 1000.0, foE - foF1)
-        # print 'foF1: ', foF1
-        foF1 = NeqJoin(foF1, 0.85 * foF1, 60.0, 0.85 * foF2 - foF1)
-        # print 'foF1: ', foF1
+        # print('1.4 * foE', 1.4 * foE
+        foF1 = neq_join(1.4 * foE, 0, 1000.0, foE - 2)
+        # print('foF1: ', foF1
+        foF1 = neq_join(0, foF1, 1000.0, foE - foF1)
+        # print('foF1: ', foF1
+        foF1 = neq_join(foF1, 0.85 * foF1, 60.0, 0.85 * foF2 - foF1)
+        # print('foF1: ', foF1
 
         if foF1 < 10 ** -6:
             foF1 = 0
 
         # F1 layer maximum density
-        if (foF1 <= 0) and (foE > 2): # how can foF1 be negative??
-            NmF1 = NeqCriticalFreqToNe(foE + 0.5)
+        if (foF1 <= 0) and (foE > 2):  # how can foF1 be negative??
+            NmF1 = neq_critical_freq_to_ne(foE + 0.5)
         else:
-            NmF1 = NeqCriticalFreqToNe(foF1)
+            NmF1 = neq_critical_freq_to_ne(foF1)
 
         assert (foF1 >= 0)
         assert (NmF1 >= 0)
@@ -628,13 +630,14 @@ class NequickG_parameters:
 
     def get_stage2para(self):
         name = ['foE', 'foF1', 'foF2', 'M3000F2']
-        return name , [self.foE, self.foF1, self.foF2, self.M3000F2]
-    ############################ STAGE 3####################################
-    def get_hmE(self):
+        return name, [self.foE, self.foF1, self.foF2, self.M3000F2]
+
+    # STAGE 3####################################
+    def get_hme(self):
         self.hmE = 120
         return 120  # [km]
 
-    def get_hmF1(self):
+    def get_hm_f1(self):
         """
 
         :param hmF2: [km]
@@ -645,7 +648,7 @@ class NequickG_parameters:
 
         return self.hmF1
 
-    def get_hmF2(self):
+    def get_hm_f2(self):
         """
 
         :param foE: [Mhz]
@@ -659,7 +662,7 @@ class NequickG_parameters:
         M3000F2 = self.M3000F2
         numerator = 1490 * M3000F2 * np.sqrt((0.0196 * M3000F2 ** 2 + 1) / (1.2967 * M3000F2 ** 2 - 1))
         assert (not np.any(np.isnan(numerator)))
-        if foE < 10 ** -30: # avoid divide by zero
+        if foE < 10 ** -30:  # avoid divide by zero
             deltaM = - 0.012
         else:
             r = float(foF2) / foE
@@ -674,9 +677,9 @@ class NequickG_parameters:
 
         return self.hmF2
 
-    ############################ STAGE 4####################################
+    # STAGE 4####################################
 
-    def get_B2bot(self):
+    def get_b2_bot(self):
         """
 
         :param NmF2:[10^11 m^-3 ]
@@ -691,7 +694,7 @@ class NequickG_parameters:
         self.B2bot = top / bottom
         return self.B2bot
 
-    def get_B1top(self):
+    def get_b1_top(self):
         """
 
         :param hmF1: [km]
@@ -701,7 +704,7 @@ class NequickG_parameters:
         self.B1top = 0.3 * (self.hmF2 - self.hmF1)
         return self.B1top
 
-    def get_B1bot(self):
+    def get_b1_bot(self):
         """
 
         :param hmF1: [km]
@@ -711,7 +714,7 @@ class NequickG_parameters:
         self.B1bot = 0.5 * (self.hmF1 - self.hmE)
         return self.B1bot
 
-    def get_BEtop(self):
+    def get_be_top(self):
         """
 
         :param B1bot: [km]
@@ -720,7 +723,7 @@ class NequickG_parameters:
         self.BEtop = max(self.B1bot, 7)
         return self.BEtop
 
-    def get_BEbot(self):
+    def get_be_bot(self):
         """
 
         :return: [km]
@@ -728,8 +731,8 @@ class NequickG_parameters:
         self.BEbot = 5.0
         return 5.0
 
-    ############################ STAGE 5####################################
-    def get_A1(self):
+    # STAGE 5####################################
+    def get_a1(self):
         """
 
         :param NmF2:  [10^11 m^-3 ]
@@ -738,7 +741,7 @@ class NequickG_parameters:
         self.A1 = 4 * self.NmF2
         return self.A1
 
-    def get_A2A3(self):
+    def get_a2a3(self):
         """
 
         :param NmE:
@@ -759,21 +762,21 @@ class NequickG_parameters:
             return self.A2, self.A3
         else:
             A3a = 4.0 * self.NmE
-            # print 'A3a: ', A3a
+            # print('A3a: ', A3a
             for i in range(5):
                 A2a = 4.0 * (self.NmF1 -
                              epstein(self.A1, self.hmF2, self.B2bot, self.hmF1) -
                              epstein(A3a, self.hmE, self.BEtop, self.hmF1))
-                # print 'A2a: ', A2a
-                A2a = NeqJoin(A2a, 0.8 * self.NmF1, 1, A2a - 0.8 * self.NmF1)
-                # print 'A2a', A2a
+                # print('A2a: ', A2a
+                A2a = neq_join(A2a, 0.8 * self.NmF1, 1, A2a - 0.8 * self.NmF1)
+                # print('A2a', A2a
                 A3a = 4.0 * (self.NmE -
                              epstein(A2a, self.hmF1, self.B1bot, self.hmE) -
                              epstein(self.A1, self.hmF2, self.B2bot, self.hmE))
 
             self.A2 = A2a
-            self.A3 = NeqJoin(A3a, 0.05, 60.0, A3a - 0.005)
-            # print 'A3: ', self.A3
+            self.A3 = neq_join(A3a, 0.05, 60.0, A3a - 0.005)
+            # print('A3: ', self.A3
         return self.A2, self.A3
 
     def shape_parameter(self):
@@ -795,13 +798,13 @@ class NequickG_parameters:
             raise ValueError("Invalid Month")
         # kb = (ka * np.exp(ka - 2) + 2) / (1 + np.exp(ka - 2))
         # self.k = (8 * np.exp(kb - 8) + kb) / (1 + np.exp(kb - 8))
-        kb = NeqJoin(ka,2,1,ka - 2.0)
-        kb = NeqJoin(8, kb, 1, kb - 8)
+        kb = neq_join(ka, 2, 1, ka - 2.0)
+        kb = neq_join(8, kb, 1, kb - 8)
 
         self.k = kb
         return self.k
 
-    def get_H0(self):
+    def get_h0(self):
         """
 
         :param B2bot: [km]
@@ -816,34 +819,33 @@ class NequickG_parameters:
         return self.H0
 
 
-class NequickG_bottomside:
-    def __init__(self, hmE, hmF1, hmF2, BEtop, BEbot, B1top, B1bot, B2bot, A1, A2, A3):
-        self.hmF2 = hmF2
-        self.hmF1 = hmF1
-        self.hmE = hmE
+class NequickGBottomside:
+    def __init__(self, hm_e, hm_f1, hm_f2, b_e_top, b_e_bot, b1top, b1bot, b2bot, a1, a2, a3):
+        self.hmF2 = hm_f2
+        self.hmF1 = hm_f1
+        self.hmE = hm_e
 
+        self.BEtop = b_e_top
+        self.BEbot = b_e_bot
+        self.B1top = b1top
+        self.B1bot = b1bot
+        self.B2bot = b2bot
 
-        self.BEtop = BEtop
-        self.BEbot = BEbot
-        self.B1top = B1top
-        self.B1bot = B1bot
-        self.B2bot = B2bot
+        self.AmpF2 = a1
+        self.AmpF1 = a2
+        self.AmpE = a3
 
-        self.AmpF2 = A1
-        self.AmpF1 = A2
-        self.AmpE = A3
-
-        assert (hmF2 > 0)
-        assert (hmF1 > 0)
-        assert (hmE > 0)
-        assert (BEtop > 0)
-        assert (BEbot > 0)
-        assert (B1top > 0)
-        assert (B1bot > 0)
-        assert (B2bot > 0)
-        assert (A1 >= 0)
-        # assert (A2 >= 0)
-        # assert (A3 >= 0) # this will fail. Why? Becuse E layer does not exist at night
+        assert (hm_f2 > 0)
+        assert (hm_f1 > 0)
+        assert (hm_e > 0)
+        assert (b_e_top > 0)
+        assert (b_e_bot > 0)
+        assert (b1top > 0)
+        assert (b1bot > 0)
+        assert (b2bot > 0)
+        assert (a1 >= 0)
+        # assert (a2 >= 0)
+        # assert (a3 >= 0) # this will fail. Why? Becuse E layer does not exist at night
 
     def electrondensity(self, h):
         assert not np.any(h > self.hmF2)
@@ -898,26 +900,26 @@ class NequickG_bottomside:
 
         dsF2 = (1 - np.exp(alphaF2)) / (thickF2 * (1 + np.exp(alphaF2)))
         dsF2[np.abs(alphaF2) > 25] = 0
-        assert( not np.any(np.isnan(dsF2)))
+        assert (not np.any(np.isnan(dsF2)))
         dsF1 = (1 - np.exp(alphaF1)) / (thickF1 * (1 + np.exp(alphaF1)))
         dsF1[np.abs(alphaF1) > 25] = 0
-        assert( not np.any(np.isnan(dsF1)))
+        assert (not np.any(np.isnan(dsF1)))
         dsE = (1 - np.exp(alphaE)) / (thickE * (1 + np.exp(alphaE)))
         dsE[np.abs(alphaE) > 25] = 0
-        assert( not np.any(np.isnan(dsE)))
+        assert (not np.any(np.isnan(dsE)))
         BC = 1 - 10 * (EpstF2 * dsF2 + EpstF1 * dsF1 + EpstE * dsE) / S
         z = (h - 100) / 10.0
 
         N[mask2] = S[mask2] * np.exp(1 - BC[mask2] * z[mask2] - np.exp(-z[mask2])) * 10 ** 11
-        assert( np.all(N > 0) )
+        assert (np.all(N > 0))
         return N
 
 
-class NequickG_topside:
-    def __init__(self, NmF2, hmF2, H0):
-        self.hmF2 = hmF2
-        self.NmF2 = NmF2
-        self.H0 = H0
+class NequickGTopside:
+    def __init__(self, nm_f2, hm_f2, h0):
+        self.hmF2 = hm_f2
+        self.NmF2 = nm_f2
+        self.H0 = h0
 
     def electrondensity(self, h):
         assert not np.any(h <= self.hmF2)
@@ -941,7 +943,7 @@ class NequickG_topside:
             else:
                 N = 4 * self.NmF2 * ea * 10 ** 11 / (1 + ea) ** 2
 
-        assert( np.all(N > 0) )
+        assert (np.all(N > 0))
         return N
 
 ########################################################################################
