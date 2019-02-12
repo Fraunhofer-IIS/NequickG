@@ -12,7 +12,7 @@ def run(table_type):
     :param table_type: (str)
     :return:
     """
-    print "Validating against", table_type, "Solar Activity data table"
+    print("Validating against", table_type, "Solar Activity data table")
 
     # Hard coded solar indices
     if table_type == "High":
@@ -57,8 +57,8 @@ def run(table_type):
 
                 writer.writerow(row)
 
-                print "Input: ", row[:7]
-                print "---Expected: ", row[8], "---Obtained: ", row[9]
+                print("Input: ", row[:7])
+                print("---Expected: ", row[8], "---Obtained: ", row[9])
     return sTECs_expected, sTECs_computed
 
 def get_computed(table_type):

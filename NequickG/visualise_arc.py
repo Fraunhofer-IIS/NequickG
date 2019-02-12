@@ -9,7 +9,7 @@ def run(table_type):
     """
     Plot all trajectory of specified in validation table
     """
-    print "Plotting trajectories in", table_type, "Solar Activity data table"
+    print("Plotting trajectories in", table_type, "Solar Activity data table")
     with open(os.path.join('Validation', table_type + '_reference.dat')) as infile:
         reader = csv.reader(infile, delimiter = ' ')
         plt.figure()

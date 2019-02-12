@@ -14,5 +14,5 @@ NEQ_global = NequickG_global(TX, BX)
 NEQ, Para = NEQ_global.get_Nequick_local(RX)
 
 # vTEC quantities of interest
-print NEQ.vTEC(100, 2000)
-print NEQ.vTEC_ratio()
+print(NEQ.vTEC(100, 2000))
+print(NEQ.vTEC_ratio())
